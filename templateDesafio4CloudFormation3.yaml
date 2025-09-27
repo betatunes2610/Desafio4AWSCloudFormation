@@ -1,0 +1,86 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: S3 + Lambda baixa arquivo do GitHub e faz upload
+
+Resources:
+  ## 1. Bucket S3
+  MeuBucketS3:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: bucketdesafio4cloudformation
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+     
+
+  ## 2. Bucket Policy
+  MyBucketPolicy:
+    Type: 'AWS::S3::BucketPolicy'
+    Properties:
+      Bucket: !Ref MeuBucketS3
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: '*'
+            Action: ['s3:PutObject']
+            Resource: !Sub "arn:aws:s3:::bucketdesafio4cloudformation/*"
+
+  MinhaFuncaoLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: lambda-download-github
+      Handler: index.handler
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: python3.13
+      Timeout: 60
+      Code:
+        ZipFile: |
+          import boto3
+          import urllib.request
+          import cfnresponse
+
+          s3 = boto3.client("s3")
+
+          def handler(event, context):
+              print("Evento recebido:", event)
+              try:
+                  url = "https://github.com/betatunes2610/Desafio4AWSCloudFormation/blob/main/ArquivosDesafio4/Popular_Spotify_Songs.csv"
+                  bucket = "bucketdesafio4cloudformation"
+                  key = "Popular_Spotify_Songs.csv"
+
+                  # Baixa o arquivo do GitHub
+                  response = urllib.request.urlopen(url)
+                  data = response.read()
+
+                  # Faz upload para o S3
+                  s3.put_object(Bucket=bucket, Key=key, Body=data)
+
+                  print(f"Arquivo {key} carregado no bucket {bucket}")
+                  cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+              except Exception as e:
+                  print("Erro:", str(e))
+                  cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+
+  CustomLambdaInvoker:
+    Type: AWS::CloudFormation::CustomResource
+    Properties:
+      ServiceToken: !GetAtt MinhaFuncaoLambda.Arn
+      BucketName: !Ref MeuBucketS3
